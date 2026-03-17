@@ -24,6 +24,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -76,19 +78,53 @@ import kotlin.coroutines.resume
 import kotlin.math.abs
 import kotlin.math.min
 
-// ── Colors ──────────────────────────────────────────────────────────────────
-private val BgColor       = Color(0xFF0D0B1A)
-private val SurfaceColor  = Color(0xFF1A1730)
-private val CardColor     = Color(0xFF221F3A)
-private val AccentColor   = Color(0xFF7C6FFF)
-private val AccentDark    = Color(0xFF4535B8)
-private val TextPrimary   = Color(0xFFEAE8FF)
-private val TextSecondary = Color(0xFF8B87B8)
-private val WaveInactive  = Color(0xFF2D2B4A)
-private val HandleColor   = Color(0xFFFFFFFF)
-private val PlaylineColor = Color(0xFFFFD700)
-private val SuccessColor  = Color(0xFF4CAF50)
-private val ErrorColor    = Color(0xFFE53935)
+// ── Theme ────────────────────────────────────────────────────────────────────
+data class AppColors(
+    val bgColor: Color,
+    val surfaceColor: Color,
+    val cardColor: Color,
+    val accentColor: Color,
+    val accentDark: Color,
+    val textPrimary: Color,
+    val textSecondary: Color,
+    val waveInactive: Color,
+    val handleColor: Color,
+    val playlineColor: Color,
+    val successColor: Color,
+    val errorColor: Color
+)
+
+val darkColors = AppColors(
+    bgColor       = Color(0xFF0D0B1A),
+    surfaceColor  = Color(0xFF1A1730),
+    cardColor     = Color(0xFF221F3A),
+    accentColor   = Color(0xFF7C6FFF),
+    accentDark    = Color(0xFF4535B8),
+    textPrimary   = Color(0xFFEAE8FF),
+    textSecondary = Color(0xFF8B87B8),
+    waveInactive  = Color(0xFF2D2B4A),
+    handleColor   = Color(0xFFFFFFFF),
+    playlineColor = Color(0xFFFFD700),
+    successColor  = Color(0xFF4CAF50),
+    errorColor    = Color(0xFFE53935)
+)
+
+val lightColors = AppColors(
+    bgColor       = Color(0xFFF6F5FF),
+    surfaceColor  = Color(0xFFFFFFFF),
+    cardColor     = Color(0xFFEEECFF),
+    accentColor   = Color(0xFF5A4FD1),
+    accentDark    = Color(0xFF3730A3),
+    textPrimary   = Color(0xFF1A1640),
+    textSecondary = Color(0xFF6B6A99),
+    waveInactive  = Color(0xFFCCCAE8),
+    handleColor   = Color(0xFF1A1640),
+    playlineColor = Color(0xFFD4A500),
+    successColor  = Color(0xFF2E7D32),
+    errorColor    = Color(0xFFC62828)
+)
+
+val LocalColors = compositionLocalOf { darkColors }
 
 // ── Data ─────────────────────────────────────────────────────────────────────
 data class AudioInfo(val uri: Uri, val name: String, val duration: Long)
@@ -157,7 +193,6 @@ suspend fun trimAudio(context: Context, inputUri: Uri, startMs: Long, endMs: Lon
     return withContext(Dispatchers.Main) {
         suspendCancellableCoroutine { cont ->
             val transformer = Transformer.Builder(context).build()
-
             transformer.addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, exportResult: ExportResult) {
                     if (!cont.isCompleted) cont.resume(true)
@@ -166,9 +201,7 @@ suspend fun trimAudio(context: Context, inputUri: Uri, startMs: Long, endMs: Lon
                     if (!cont.isCompleted) cont.resume(false)
                 }
             })
-
             cont.invokeOnCancellation { transformer.cancel() }
-
             val mediaItem = MediaItem.Builder()
                 .setUri(inputUri)
                 .setClippingConfiguration(
@@ -178,22 +211,13 @@ suspend fun trimAudio(context: Context, inputUri: Uri, startMs: Long, endMs: Lon
                         .build()
                 )
                 .build()
-
-            try {
-                transformer.start(mediaItem, outputFile.absolutePath)
-            } catch (e: Exception) {
-                if (!cont.isCompleted) cont.resume(false)
-            }
+            try { transformer.start(mediaItem, outputFile.absolutePath) }
+            catch (e: Exception) { if (!cont.isCompleted) cont.resume(false) }
         }
     }
 }
 
-suspend fun saveToMediaStore(
-    context: Context,
-    file: File,
-    displayName: String,
-    saveType: SaveType
-): Uri? {
+suspend fun saveToMediaStore(context: Context, file: File, displayName: String, saveType: SaveType): Uri? {
     return withContext(Dispatchers.IO) {
         try {
             val cv = ContentValues().apply {
@@ -253,103 +277,126 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { RingtoneApp() }
+        val prefs = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        val savedDark = prefs.getBoolean("is_dark", false)
+        setContent { RingtoneApp(initialDark = savedDark) }
     }
 }
 
 // ── Root composable ───────────────────────────────────────────────────────────
 @Composable
-fun RingtoneApp() {
+fun RingtoneApp(initialDark: Boolean) {
     val context = LocalContext.current
-    var audioInfo by remember { mutableStateOf<AudioInfo?>(null) }
+    var isDark by remember { mutableStateOf(initialDark) }
+    val colors = if (isDark) darkColors else lightColors
 
-    val readPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-        Manifest.permission.READ_MEDIA_AUDIO
-    else
-        Manifest.permission.READ_EXTERNAL_STORAGE
-
-    var hasPermission by remember {
-        mutableStateOf(context.checkSelfPermission(readPermission) == PackageManager.PERMISSION_GRANTED)
+    fun toggleTheme() {
+        isDark = !isDark
+        context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+            .edit().putBoolean("is_dark", isDark).apply()
     }
 
-    val permLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted -> hasPermission = granted }
+    CompositionLocalProvider(LocalColors provides colors) {
+        var audioInfo by remember { mutableStateOf<AudioInfo?>(null) }
 
-    val filePicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        uri?.let {
-            try {
-                context.contentResolver.takePersistableUriPermission(
-                    it, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            } catch (_: Exception) {}
-            audioInfo = getAudioInfo(context, it)
+        val readPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            Manifest.permission.READ_MEDIA_AUDIO
+        else
+            Manifest.permission.READ_EXTERNAL_STORAGE
+
+        var hasPermission by remember {
+            mutableStateOf(context.checkSelfPermission(readPermission) == PackageManager.PERMISSION_GRANTED)
+        }
+
+        val permLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted -> hasPermission = granted }
+
+        val filePicker = rememberLauncherForActivityResult(
+            ActivityResultContracts.OpenDocument()
+        ) { uri ->
+            uri?.let {
+                try { context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                catch (_: Exception) {}
+                audioInfo = getAudioInfo(context, it)
+            }
+        }
+
+        fun openPicker() {
+            if (hasPermission) filePicker.launch(arrayOf("audio/*"))
+            else permLauncher.launch(readPermission)
+        }
+
+        val animBg by animateColorAsState(colors.bgColor, tween(300))
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(animBg)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+        ) {
+            AnimatedContent(
+                targetState = audioInfo,
+                transitionSpec = { fadeIn() togetherWith fadeOut() }
+            ) { info ->
+                if (info == null) EmptyState(onPickFile = ::openPicker, onToggleTheme = ::toggleTheme, isDark = isDark)
+                else AudioEditorScreen(audioInfo = info, onPickNew = ::openPicker, onToggleTheme = ::toggleTheme, isDark = isDark)
+            }
         }
     }
+}
 
-    fun openPicker() {
-        if (hasPermission) filePicker.launch(arrayOf("audio/*"))
-        else permLauncher.launch(readPermission)
-    }
-
+// ── Theme toggle button ───────────────────────────────────────────────────────
+@Composable
+fun ThemeToggle(isDark: Boolean, onToggle: () -> Unit) {
+    val c = LocalColors.current
     Box(
         modifier = Modifier
-            .fillMaxSize()
-            .background(BgColor)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(c.surfaceColor)
+            .clickable(onClick = onToggle),
+        contentAlignment = Alignment.Center
     ) {
-        AnimatedContent(
-            targetState = audioInfo,
-            transitionSpec = { fadeIn() togetherWith fadeOut() }
-        ) { info ->
-            if (info == null) EmptyState(onPickFile = ::openPicker)
-            else AudioEditorScreen(audioInfo = info, onPickNew = ::openPicker)
-        }
+        Text(if (isDark) "☀" else "☾", fontSize = 18.sp)
     }
 }
 
 // ── Empty state ───────────────────────────────────────────────────────────────
 @Composable
-fun EmptyState(onPickFile: () -> Unit) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+fun EmptyState(onPickFile: () -> Unit, onToggleTheme: () -> Unit, isDark: Boolean) {
+    val c = LocalColors.current
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.align(Alignment.TopEnd).padding(16.dp)) {
+            ThemeToggle(isDark, onToggleTheme)
+        }
         Column(
+            modifier = Modifier.align(Alignment.Center).padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-            modifier = Modifier.padding(32.dp)
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
             Box(
-                modifier = Modifier
-                    .size(112.dp)
-                    .clip(CircleShape)
-                    .background(SurfaceColor),
+                modifier = Modifier.size(112.dp).clip(CircleShape).background(c.surfaceColor),
                 contentAlignment = Alignment.Center
             ) { Text("✂️", fontSize = 44.sp) }
 
-            Text("Ringtone Maker", color = TextPrimary, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-
+            Text("Ringtone Maker", color = c.textPrimary, fontSize = 28.sp, fontWeight = FontWeight.Bold)
             Text(
                 "Trim any audio file into the perfect\nringtone, alarm, or notification",
-                color = TextSecondary,
-                fontSize = 15.sp,
-                textAlign = TextAlign.Center,
-                lineHeight = 22.sp
+                color = c.textSecondary, fontSize = 15.sp,
+                textAlign = TextAlign.Center, lineHeight = 22.sp
             )
-
             Spacer(Modifier.height(4.dp))
-
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(16.dp))
-                    .background(Brush.linearGradient(listOf(AccentDark, AccentColor)))
+                    .background(Brush.linearGradient(listOf(c.accentDark, c.accentColor)))
                     .clickable(onClick = onPickFile)
                     .padding(horizontal = 40.dp, vertical = 16.dp)
             ) {
                 Text("Select Audio File", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
-
-            Text("MP3 · M4A · WAV · OGG · FLAC and more", color = TextSecondary, fontSize = 12.sp)
+            Text("MP3 · M4A · WAV · OGG · FLAC and more", color = c.textSecondary, fontSize = 12.sp)
         }
     }
 }
@@ -357,9 +404,10 @@ fun EmptyState(onPickFile: () -> Unit) {
 // ── Editor screen ─────────────────────────────────────────────────────────────
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AudioEditorScreen(audioInfo: AudioInfo, onPickNew: () -> Unit) {
+fun AudioEditorScreen(audioInfo: AudioInfo, onPickNew: () -> Unit, onToggleTheme: () -> Unit, isDark: Boolean) {
     val context = LocalContext.current
     val scope   = rememberCoroutineScope()
+    val c       = LocalColors.current
 
     var waveform      by remember { mutableStateOf<FloatArray?>(null) }
     var startFraction by remember { mutableFloatStateOf(0f) }
@@ -411,9 +459,7 @@ fun AudioEditorScreen(audioInfo: AudioInfo, onPickNew: () -> Unit) {
             player = mp
         }
         if (isPlaying) { p.pause(); isPlaying = false }
-        else {
-            try { p.seekTo(startMs.toInt()); p.start(); isPlaying = true } catch (_: Exception) {}
-        }
+        else { try { p.seekTo(startMs.toInt()); p.start(); isPlaying = true } catch (_: Exception) {} }
     }
 
     suspend fun doCut() {
@@ -447,30 +493,32 @@ fun AudioEditorScreen(audioInfo: AudioInfo, onPickNew: () -> Unit) {
         ) {
             // Header
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                Text("✂️  Ringtone Maker", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Box(
-                    Modifier.clip(RoundedCornerShape(8.dp)).background(SurfaceColor)
-                        .clickable(onClick = onPickNew).padding(horizontal = 12.dp, vertical = 6.dp)
-                ) { Text("Change File", color = AccentColor, fontSize = 13.sp) }
+                Text("✂️  Ringtone Maker", color = c.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ThemeToggle(isDark, onToggleTheme)
+                    Box(
+                        Modifier.clip(RoundedCornerShape(8.dp)).background(c.surfaceColor)
+                            .clickable(onClick = onPickNew).padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) { Text("Change File", color = c.accentColor, fontSize = 13.sp) }
+                }
             }
 
             // File info
-            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(SurfaceColor).padding(16.dp)) {
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceColor).padding(16.dp)) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(audioInfo.name, color = TextPrimary, fontSize = 15.sp,
+                    Text(audioInfo.name, color = c.textPrimary, fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("Total duration: ${formatTime(audioInfo.duration)}", color = TextSecondary, fontSize = 13.sp)
+                    Text("Total duration: ${formatTime(audioInfo.duration)}", color = c.textSecondary, fontSize = 13.sp)
                 }
             }
 
             // Waveform + trim
-            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(SurfaceColor).padding(16.dp)) {
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceColor).padding(16.dp)) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Trim", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-
+                    Text("Trim", color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     if (waveform == null) {
                         Box(Modifier.fillMaxWidth().height(100.dp), Alignment.Center) {
-                            LinearProgressIndicator(Modifier.fillMaxWidth(0.6f), color = AccentColor, trackColor = WaveInactive)
+                            LinearProgressIndicator(Modifier.fillMaxWidth(0.6f), color = c.accentColor, trackColor = c.waveInactive)
                         }
                     } else {
                         WaveformView(
@@ -478,83 +526,83 @@ fun AudioEditorScreen(audioInfo: AudioInfo, onPickNew: () -> Unit) {
                             startFraction = startFraction,
                             endFraction   = endFraction,
                             playFraction  = if (isPlaying) playFraction else -1f,
+                            accentColor   = c.accentColor,
+                            waveInactive  = c.waveInactive,
+                            handleColor   = c.handleColor,
+                            playlineColor = c.playlineColor,
                             onStartChange = { startFraction = it },
                             onEndChange   = { endFraction   = it }
                         )
                     }
-
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
                         Column {
-                            Text("Start", color = TextSecondary, fontSize = 11.sp)
-                            Text(formatTime(startMs), color = AccentColor, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                            Text("Start", color = c.textSecondary, fontSize = 11.sp)
+                            Text(formatTime(startMs), color = c.accentColor, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                         }
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Duration", color = TextSecondary, fontSize = 11.sp)
-                            Text(formatTime(trimDurMs), color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text("Duration", color = c.textSecondary, fontSize = 11.sp)
+                            Text(formatTime(trimDurMs), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                         }
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("End", color = TextSecondary, fontSize = 11.sp)
-                            Text(formatTime(endMs), color = AccentColor, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                            Text("End", color = c.textSecondary, fontSize = 11.sp)
+                            Text(formatTime(endMs), color = c.accentColor, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                         }
                     }
                 }
             }
 
-            // Playback controls
+            // Playback
             Row(Modifier.fillMaxWidth(), Arrangement.Center) {
                 Box(
                     modifier = Modifier.size(60.dp).clip(CircleShape)
-                        .background(if (isPlaying) AccentColor else SurfaceColor)
+                        .background(if (isPlaying) c.accentColor else c.surfaceColor)
                         .clickable { togglePlayback() },
                     contentAlignment = Alignment.Center
                 ) { Text(if (isPlaying) "⏸" else "▶", fontSize = 24.sp) }
             }
 
             // Output name
-            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(SurfaceColor).padding(16.dp)) {
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceColor).padding(16.dp)) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Output Name", color = TextSecondary, fontSize = 12.sp)
+                    Text("Output Name", color = c.textSecondary, fontSize = 12.sp)
                     TextField(
                         value         = outputName,
                         onValueChange = { outputName = it },
                         modifier      = Modifier.fillMaxWidth(),
                         singleLine    = true,
-                        textStyle     = TextStyle(fontSize = 14.sp, color = TextPrimary),
+                        textStyle     = TextStyle(fontSize = 14.sp, color = c.textPrimary),
                         colors        = TextFieldDefaults.colors(
-                            focusedContainerColor   = CardColor,
-                            unfocusedContainerColor = CardColor,
+                            focusedContainerColor   = c.cardColor,
+                            unfocusedContainerColor = c.cardColor,
                             focusedIndicatorColor   = Color.Transparent,
                             unfocusedIndicatorColor = Color.Transparent,
-                            focusedTextColor        = TextPrimary,
-                            unfocusedTextColor      = TextPrimary,
-                            cursorColor             = AccentColor
+                            focusedTextColor        = c.textPrimary,
+                            unfocusedTextColor      = c.textPrimary,
+                            cursorColor             = c.accentColor
                         ),
                         shape = RoundedCornerShape(12.dp)
                     )
-                    Text(".m4a", color = TextSecondary, fontSize = 11.sp)
+                    Text(".m4a", color = c.textSecondary, fontSize = 11.sp)
                 }
             }
 
-            // Save type selector
-            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(SurfaceColor).padding(16.dp)) {
+            // Save type
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceColor).padding(16.dp)) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Save As", color = TextSecondary, fontSize = 12.sp)
+                    Text("Save As", color = c.textSecondary, fontSize = 12.sp)
                     Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) {
                         SaveType.entries.forEach { type ->
                             val selected = type == selectedSaveType
                             Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (selected) AccentColor else CardColor)
-                                    .clickable { selectedSaveType = type }
-                                    .padding(vertical = 10.dp),
+                                modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
+                                    .background(if (selected) c.accentColor else c.cardColor)
+                                    .clickable { selectedSaveType = type }.padding(vertical = 10.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     Text(type.icon, fontSize = 18.sp)
                                     Text(type.label,
-                                        color = if (selected) Color.White else TextSecondary,
+                                        color = if (selected) Color.White else c.textSecondary,
                                         fontSize = 9.sp,
                                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
                                 }
@@ -564,36 +612,33 @@ fun AudioEditorScreen(audioInfo: AudioInfo, onPickNew: () -> Unit) {
                 }
             }
 
-            // Status banner
+            // Status
             saveStatus?.let { status ->
-                val isError = status.contains("fail", ignoreCase = true) ||
-                              status.contains("Could not", ignoreCase = true)
+                val isError = status.contains("fail", ignoreCase = true) || status.contains("Could not", ignoreCase = true)
                 Box(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                        .background(if (isError) ErrorColor.copy(alpha = 0.15f) else SuccessColor.copy(alpha = 0.15f))
+                        .background(if (isError) c.errorColor.copy(alpha = 0.15f) else c.successColor.copy(alpha = 0.15f))
                         .padding(14.dp)
                 ) {
-                    Text(status, color = if (isError) ErrorColor else SuccessColor,
+                    Text(status, color = if (isError) c.errorColor else c.successColor,
                         fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                 }
             }
 
             // Cut & Save button
             Box(
-                modifier = Modifier
-                    .fillMaxWidth().height(56.dp)
-                    .clip(RoundedCornerShape(16.dp))
+                modifier = Modifier.fillMaxWidth().height(56.dp).clip(RoundedCornerShape(16.dp))
                     .background(
-                        if (isSaving) SolidColor(SurfaceColor)
-                        else Brush.linearGradient(listOf(AccentDark, AccentColor))
+                        if (isSaving) SolidColor(c.surfaceColor)
+                        else Brush.linearGradient(listOf(c.accentDark, c.accentColor))
                     )
                     .clickable(enabled = !isSaving) { scope.launch { doCut() } },
                 contentAlignment = Alignment.Center
             ) {
                 if (isSaving) {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        LinearProgressIndicator(Modifier.width(100.dp), color = AccentColor, trackColor = WaveInactive)
-                        Text(saveStatus ?: "Processing…", color = TextSecondary, fontSize = 13.sp)
+                        LinearProgressIndicator(Modifier.width(100.dp), color = c.accentColor, trackColor = c.waveInactive)
+                        Text(saveStatus ?: "Processing…", color = c.textSecondary, fontSize = 13.sp)
                     }
                 } else {
                     Text("✂  Cut & Save", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -604,32 +649,27 @@ fun AudioEditorScreen(audioInfo: AudioInfo, onPickNew: () -> Unit) {
         }
     }
 
-    // Write settings dialog
     if (showWriteSettingsDialog) {
         BasicAlertDialog(onDismissRequest = { showWriteSettingsDialog = false }) {
-            Box(Modifier.clip(RoundedCornerShape(20.dp)).background(SurfaceColor).padding(24.dp)) {
+            Box(Modifier.clip(RoundedCornerShape(20.dp)).background(c.surfaceColor).padding(24.dp)) {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Text("Set as ${selectedSaveType.label}?",
-                        color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("Set as ${selectedSaveType.label}?", color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     Text(
-                        "File saved! To also set it as your default ${selectedSaveType.label.lowercase()}, " +
-                        "grant \"Modify system settings\" permission.",
-                        color = TextSecondary, fontSize = 14.sp, lineHeight = 20.sp
+                        "File saved! To also set it as your default ${selectedSaveType.label.lowercase()}, grant \"Modify system settings\" permission.",
+                        color = c.textSecondary, fontSize = 14.sp, lineHeight = 20.sp
                     )
                     Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(10.dp)) {
-                        Box(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(CardColor)
-                            .clickable { showWriteSettingsDialog = false }.padding(vertical = 12.dp),
-                            Alignment.Center
-                        ) { Text("Skip", color = TextSecondary, fontSize = 14.sp) }
-                        Box(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(AccentColor)
+                        Box(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(c.cardColor)
+                            .clickable { showWriteSettingsDialog = false }.padding(vertical = 12.dp), Alignment.Center
+                        ) { Text("Skip", color = c.textSecondary, fontSize = 14.sp) }
+                        Box(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(c.accentColor)
                             .clickable {
                                 context.startActivity(
                                     Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS)
                                         .setData(Uri.parse("package:${context.packageName}"))
                                 )
                                 showWriteSettingsDialog = false
-                            }.padding(vertical = 12.dp),
-                            Alignment.Center
+                            }.padding(vertical = 12.dp), Alignment.Center
                         ) { Text("Grant", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
                     }
                 }
@@ -645,15 +685,17 @@ fun WaveformView(
     startFraction: Float,
     endFraction: Float,
     playFraction: Float,
+    accentColor: Color,
+    waveInactive: Color,
+    handleColor: Color,
+    playlineColor: Color,
     onStartChange: (Float) -> Unit,
     onEndChange: (Float) -> Unit
 ) {
     var totalWidth by remember { mutableFloatStateOf(1f) }
 
     Canvas(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(110.dp)
+        modifier = Modifier.fillMaxWidth().height(110.dp)
             .pointerInput(startFraction, endFraction) {
                 detectDragGestures { change, _ ->
                     val x = (change.position.x / totalWidth).coerceIn(0f, 1f)
@@ -665,36 +707,28 @@ fun WaveformView(
             }
     ) {
         totalWidth = size.width
-        val h       = size.height
-        val centerY = h / 2f
-        val bars    = waveform.size
-        val barW    = size.width / bars
+        val h = size.height; val centerY = h / 2f
+        val bars = waveform.size; val barW = size.width / bars
 
         waveform.forEachIndexed { i, amp ->
-            val x        = i * barW + barW / 2f
-            val fraction = i.toFloat() / bars
-            val inRange  = fraction in startFraction..endFraction
-            val barH     = amp * h * 0.85f
+            val x = i * barW + barW / 2f
+            val inRange = (i.toFloat() / bars) in startFraction..endFraction
+            val barH = amp * h * 0.85f
             drawLine(
-                color       = if (inRange) AccentColor else WaveInactive,
-                start       = Offset(x, centerY - barH / 2f),
-                end         = Offset(x, centerY + barH / 2f),
-                strokeWidth = (barW - 1f).coerceAtLeast(1.5f),
-                cap         = StrokeCap.Round
+                color = if (inRange) accentColor else waveInactive,
+                start = Offset(x, centerY - barH / 2f), end = Offset(x, centerY + barH / 2f),
+                strokeWidth = (barW - 1f).coerceAtLeast(1.5f), cap = StrokeCap.Round
             )
         }
-
         val sx = startFraction * size.width
-        drawLine(HandleColor, Offset(sx, 0f), Offset(sx, h), strokeWidth = 2.5f)
-        drawCircle(HandleColor, radius = 7f, center = Offset(sx, centerY))
-
+        drawLine(handleColor, Offset(sx, 0f), Offset(sx, h), strokeWidth = 2.5f)
+        drawCircle(handleColor, radius = 7f, center = Offset(sx, centerY))
         val ex = endFraction * size.width
-        drawLine(HandleColor, Offset(ex, 0f), Offset(ex, h), strokeWidth = 2.5f)
-        drawCircle(HandleColor, radius = 7f, center = Offset(ex, centerY))
-
+        drawLine(handleColor, Offset(ex, 0f), Offset(ex, h), strokeWidth = 2.5f)
+        drawCircle(handleColor, radius = 7f, center = Offset(ex, centerY))
         if (playFraction >= 0f) {
             val px = playFraction * size.width
-            drawLine(PlaylineColor, Offset(px, 0f), Offset(px, h), strokeWidth = 2f)
+            drawLine(playlineColor, Offset(px, 0f), Offset(px, h), strokeWidth = 2f)
         }
     }
 }
