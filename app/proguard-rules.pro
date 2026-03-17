@@ -1,0 +1,4 @@
+-keepattributes *Annotation*
+-keep class androidx.compose.** { *; }
+-keep class androidx.media3.** { *; }
+-dontwarn kotlin.**
