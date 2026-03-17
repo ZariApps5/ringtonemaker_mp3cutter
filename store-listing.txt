@@ -1,0 +1,57 @@
+==============================================
+RINGTONE MAKER / MP3 CUTTER — PLAY STORE LISTING
+==============================================
+
+APP TITLE (50 chars max)
+------------------------
+Ringtone Maker & MP3 Cutter
+
+
+SHORT DESCRIPTION (80 chars max)
+---------------------------------
+Cut any audio file into a ringtone. Trim, preview, and set in seconds.
+
+
+FULL DESCRIPTION (4000 chars max)
+----------------------------------
+Ringtone Maker & MP3 Cutter is the easiest way to turn any song or audio file on your phone into a custom ringtone, notification tone, or alarm.
+
+✂️ PRECISE AUDIO TRIMMING
+Pick your audio file, drag the start and end handles on the waveform to select exactly the section you want, then tap Trim. It's that simple.
+
+🎵 LIVE WAVEFORM PREVIEW
+See a full waveform visualization of your audio so you know exactly what you're cutting. Drag the handles with precision — no guesswork.
+
+▶ PLAY BEFORE YOU CUT
+Preview the trimmed section before saving to make sure it sounds perfect.
+
+🔔 SET AS RINGTONE
+Save your trimmed audio and set it directly as your phone ringtone, notification sound, or alarm tone — all from within the app.
+
+📁 WORKS WITH ALL AUDIO FORMATS
+Supports MP3, AAC, M4A, OGG, WAV, and more. Any audio file on your device works.
+
+🌙☀ DARK & LIGHT MODE
+A deep purple dark mode and a crisp light mode. Your preference is saved automatically.
+
+PERFECT FOR:
+• Making custom ringtones from your music library
+• Cutting a specific lyric or drop as a notification sound
+• Trimming audio clips for any purpose
+
+No ads. Minimal permissions — only reads audio files you explicitly choose.
+
+
+KEYWORDS / TAGS
+---------------
+ringtone maker, MP3 cutter, audio trimmer, ringtone cutter, custom ringtone, music cutter, audio editor, trim audio, ringtone creator
+
+
+CATEGORY
+--------
+Music & Audio
+
+
+CONTENT RATING
+--------------
+Everyone
